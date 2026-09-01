@@ -41,5 +41,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Create database schema
+        run: |
+          PGPASSWORD=payment_password psql \
+            -h localhost \
+            -p 5432 \
+            -U payment_user \
+            -d payment_db \
+            -f schema.sql
+
       - name: Run tests
         run: python -m pytest
