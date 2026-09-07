@@ -3,7 +3,7 @@ import psycopg
 
 DATABASE_URL = (
     "postgresql://payment_user:payment_password"
-    "@localhost:5432/payment_db"
+    "@127.0.0.1:5432/payment_db"
 )
 
 

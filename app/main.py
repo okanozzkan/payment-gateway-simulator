@@ -3,20 +3,30 @@ from decimal import Decimal
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.database import get_connection
 
 
-app = FastAPI(title="Payment Gateway Simulator")
+app = FastAPI(
+    title="Payment Gateway Simulator"
+)
 
+
+# =========================
+# Request Model
+# =========================
 
 class PaymentRequest(BaseModel):
     customer_id: str = Field(min_length=1)
     amount: Decimal = Field(gt=0)
     currency: Literal["TRY", "USD", "EUR", "GBP"]
 
+
+# =========================
+# Response Model
+# =========================
 
 class PaymentResponse(BaseModel):
     transaction_id: str
@@ -27,6 +37,10 @@ class PaymentResponse(BaseModel):
     created_at: datetime
 
 
+# =========================
+# Root Endpoint
+# =========================
+
 @app.get("/")
 def root():
     return {
@@ -35,19 +49,56 @@ def root():
     }
 
 
+# =========================
+# Create Payment
+# =========================
+
 @app.post(
     "/payments",
     response_model=PaymentResponse,
     status_code=status.HTTP_201_CREATED
 )
-def create_payment(payment: PaymentRequest):
-
-    transaction_id = f"TX-{uuid4()}"
-    created_at = datetime.now(timezone.utc)
-    payment_status = "APPROVED"
+def create_payment(
+    payment: PaymentRequest,
+    idempotency_key: str = Header(...)
+):
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
+
+            # Check whether this idempotency key was already processed
+            cursor.execute(
+                """
+                SELECT
+                    transaction_id,
+                    customer_id,
+                    amount,
+                    currency,
+                    status,
+                    created_at
+                FROM payments
+                WHERE idempotency_key = %s
+                """,
+                (idempotency_key,)
+            )
+
+            row = cursor.fetchone()
+
+            # Return existing transaction
+            if row is not None:
+                return PaymentResponse(
+                    transaction_id=row[0],
+                    customer_id=row[1],
+                    amount=row[2],
+                    currency=row[3],
+                    status=row[4],
+                    created_at=row[5]
+                )
+
+            # Create new transaction
+            transaction_id = f"TX-{uuid4()}"
+            created_at = datetime.now(timezone.utc)
+            payment_status = "APPROVED"
 
             cursor.execute(
                 """
@@ -57,9 +108,10 @@ def create_payment(payment: PaymentRequest):
                     amount,
                     currency,
                     status,
-                    created_at
+                    created_at,
+                    idempotency_key
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     transaction_id,
@@ -67,7 +119,8 @@ def create_payment(payment: PaymentRequest):
                     payment.amount,
                     payment.currency,
                     payment_status,
-                    created_at
+                    created_at,
+                    idempotency_key
                 )
             )
 
@@ -83,7 +136,56 @@ def create_payment(payment: PaymentRequest):
     )
 
 
-@app.get("/payments/{transaction_id}", response_model=PaymentResponse)
+# =========================
+# Get All Payments
+# =========================
+
+@app.get(
+    "/payments",
+    response_model=list[PaymentResponse]
+)
+def get_payments():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT
+                    transaction_id,
+                    customer_id,
+                    amount,
+                    currency,
+                    status,
+                    created_at
+                FROM payments
+                ORDER BY created_at DESC
+                """
+            )
+
+            rows = cursor.fetchall()
+
+    return [
+        PaymentResponse(
+            transaction_id=row[0],
+            customer_id=row[1],
+            amount=row[2],
+            currency=row[3],
+            status=row[4],
+            created_at=row[5]
+        )
+        for row in rows
+    ]
+
+
+# =========================
+# Get Single Payment
+# =========================
+
+@app.get(
+    "/payments/{transaction_id}",
+    response_model=PaymentResponse
+)
 def get_payment(transaction_id: str):
 
     with get_connection() as connection:
