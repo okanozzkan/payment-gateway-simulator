@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from decimal import Decimal
 
 
 client = TestClient(app)
@@ -24,7 +25,7 @@ def test_create_payment():
     data = response.json()
 
     assert data["customer_id"] == "C_TEST_001"
-    assert data["amount"] == "100.5"
+    assert Decimal(data["amount"]) == Decimal("100.50")
     assert data["currency"] == "TRY"
     assert data["status"] == "APPROVED"
     assert "transaction_id" in data
@@ -206,6 +207,6 @@ def test_idempotency():
     )
 
     assert second_payment["customer_id"] == first_payment["customer_id"]
-    assert second_payment["amount"] == first_payment["amount"]
+    assert Decimal(second_payment["amount"]) == Decimal(first_payment["amount"])
     assert second_payment["currency"] == first_payment["currency"]
     assert second_payment["status"] == first_payment["status"]
